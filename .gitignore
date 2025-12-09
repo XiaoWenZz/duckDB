@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Data
+data/
+*.parquet
+*.csv
+# Keep the benchmark results if small, but maybe better to ignore if not sure. Keeping for now as it's an output.
+# duckdb_benchmark_results.csv 
+
+# LaTeX
+*.aux
+*.log
+*.out
+*.pdf
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+
+# OS
+.DS_Store

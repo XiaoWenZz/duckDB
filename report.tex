@@ -1,0 +1,105 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{geometry}
+
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+
+\title{\textbf{DuckDB Parallel Analysis Performance Evaluation}}
+\author{Performance Verification Team}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+This report details the verification and performance evaluation of DuckDB's parallel analytical processing capabilities. The primary objective is to analyze the system's scalability with respect to the number of threads and to compare performance across different data formats (Parquet vs. CSV).
+
+\section{Experimental Setup}
+
+\subsection{Hardware Environment}
+\begin{itemize}
+    \item \textbf{CPU}: [TO BE FILLED: e.g., Intel Core i7 / AMD Ryzen]
+    \item \textbf{RAM}: [TO BE FILLED: e.g., 32GB DDR4]
+    \item \textbf{OS}: [TO BE FILLED: e.g., Ubuntu 20.04 LTS / macOS]
+\end{itemize}
+
+\subsection{Dataset}
+\begin{itemize}
+    \item \textbf{Source}: NYC Taxi Data (Yellow Trip Data).
+    \item \textbf{Format}: Parquet (Columnar) and CSV (Row-based).
+    \item \textbf{Volume}: Approximately 10GB-50GB.
+\end{itemize}
+
+\section{Experimental Design}
+
+\subsection{Workloads (Queries)}
+We utilized three distinct query types to stress different aspects of the engine:
+\begin{itemize}
+    \item \textbf{Q1 (I/O Bound)}: Simple aggregation (`SELECT count(*), avg(...)`).
+    \item \textbf{Q2 (Mixed)}: Filter and Group By aggregation suitable for observing vectorization benefits.
+    \item \textbf{Q3 (CPU Bound)}: High cardinality Group By and sorting to test parallel shuffle and sort.
+\end{itemize}
+
+\section{Results and Analysis}
+
+\subsection{Experiment 1: Parallelism Scalability}
+The following table shows the execution time (in seconds) for each query as the thread count increases.
+
+% TODO: Insert Python script output here
+\begin{table}[h]
+    \centering
+    \begin{tabular}{c|ccc}
+        \toprule
+        \textbf{Threads} & \textbf{Q1 (sec)} & \textbf{Q2 (sec)} & \textbf{Q3 (sec)} \\
+        \midrule
+        1 & TBD & TBD & TBD \\
+        2 & TBD & TBD & TBD \\
+        4 & TBD & TBD & TBD \\
+        8 & TBD & TBD & TBD \\
+        \bottomrule
+    \end{tabular}
+    \caption{Execution time vs. Thread Count (Parquet)}
+    \label{tab:scalability}
+\end{table}
+
+\textbf{Analysis}:
+\begin{itemize}
+    \item \textbf{Speedup Calculation}: $Speedup = \frac{Time_{1\_thread}}{Time_{N\_threads}}$.
+    \item Observe the diminishing returns as specified by Amdahl's Law.
+    \item Q1 is expected to hit I/O bottlenecks earlier than Q3.
+\end{itemize}
+
+\subsection{Experiment 2: File Format Comparison}
+Comparison of execution times between Parquet and CSV using maximum available threads.
+
+\begin{table}[h]
+    \centering
+    \begin{tabular}{l|cc}
+        \toprule
+        \textbf{Query} & \textbf{Parquet (sec)} & \textbf{CSV (sec)} \\
+        \midrule
+        Q1 & TBD & TBD \\
+        Q2 & TBD & TBD \\
+        Q3 & TBD & TBD \\
+        \bottomrule
+    \end{tabular}
+    \caption{Parquet vs. CSV Performance}
+    \label{tab:formats}
+\end{table}
+
+\textbf{Analysis}:
+\begin{itemize}
+    \item Parquet should significantly outperform CSV due to column pruning and predicate pushdown (statistics).
+    \item CSV parsing overhead is significant and often CPU-bound.
+\end{itemize}
+
+\section{Conclusion}
+Summarize the findings regarding DuckDB's parallel efficiency and the critical importance of using optimized columnar formats like Parquet for analytical workloads.
+
+\end{document}

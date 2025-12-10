@@ -248,6 +248,8 @@ def main():
                     "Max_Mem_MB": max_mem_peak,
                     "Raw_Times": times
                 })
+            except Exception as e:
+                print(f"\n  [Error] Failed to run CSV query {q_name}: {e}")
 
 
     # 保存结果

@@ -224,15 +224,19 @@ def main():
             
             try:
                 times = []
+                cpus = []
+                mems = []
                 print(f"  Running {q_name}...", end="", flush=True)
                 
                 for i in range(ITERATIONS):
-                    t = run_query(conn, q_name, formatted_sql, max_threads, i)
-                    times.append(t)
-                    print(f" {t:.2f}s", end="", flush=True)
-                    
+                    duration, avg_cpu, max_mem = run_query(conn, q_name, formatted_sql, max_threads, i)
+                    times.append(duration)
+                    cpus.append(avg_cpu)
+                    mems.append(max_mem)
+                
                 avg_time = sum(times) / len(times)
-                print(f" | Avg: {avg_time:.4f}s")
+                avg_cpu_total = sum(cpus) / len(cpus)
+                max_mem_peak = max(mems)
                 
                 results.append({
                     "Experiment": "Format_Comparison",
@@ -240,10 +244,11 @@ def main():
                     "Query": q_name,
                     "Threads": max_threads,
                     "Avg_Time_Sec": avg_time,
+                    "Avg_CPU_Pct": avg_cpu_total,
+                    "Max_Mem_MB": max_mem_peak,
                     "Raw_Times": times
                 })
-            except Exception as e:
-                print(f"\n  [Error] Failed to run CSV query {q_name}: {e}")
+
 
     # 保存结果
     df = pd.DataFrame(results)

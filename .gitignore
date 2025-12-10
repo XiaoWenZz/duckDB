@@ -6,7 +6,6 @@ __pycache__/
 # Data
 data/
 *.parquet
-*.csv
 # Keep the benchmark results if small, but maybe better to ignore if not sure. Keeping for now as it's an output.
 # duckdb_benchmark_results.csv 
 

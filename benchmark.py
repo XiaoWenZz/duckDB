@@ -22,7 +22,7 @@ ITERATIONS = 5
 
 # 是否在每次运行前尝试清除系统缓存 (需要 sudo 权限)
 # [cite: 47] 建议 Linux/macOS 开启，Windows 需手动或忽略
-CLEAR_CACHE = False 
+CLEAR_CACHE = True
 
 # ================= 查询定义 (Q1-Q3) =================
 # 完全复用 PDF 中的 SQL 定义 [cite: 58-82]

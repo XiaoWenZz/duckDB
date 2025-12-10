@@ -5,8 +5,84 @@ import subprocess
 import pandas as pd
 import platform
 import glob
+import psutil
+import threading
 
-# ================= 配置区域 =================
+# ... (Previous imports)
+
+class ResourceMonitor:
+    def __init__(self, interval=0.1):
+        self.interval = interval
+        self.running = False
+        self.cpu_usage = []
+        self.memory_usage = []
+        self.thread = None
+
+    def _monitor(self):
+        process = psutil.Process(os.getpid())
+        while self.running:
+            # CPU percent over interval (blocking for interval inside psutil if > 0)
+            # Use interval=None and manual sleep to control loop better if needed, 
+            # but psutil.cpu_percent(interval=0.1) is good for sampling.
+            try:
+                cpu = process.cpu_percent(interval=self.interval)
+                mem = process.memory_info().rss / (1024 * 1024) # MB
+                self.cpu_usage.append(cpu)
+                self.memory_usage.append(mem)
+            except Exception:
+                break
+
+    def start(self):
+        self.running = True
+        self.thread = threading.Thread(target=self._monitor)
+        self.thread.start()
+
+    def stop(self):
+        self.running = False
+        if self.thread:
+            self.thread.join()
+        
+    def get_stats(self):
+        if not self.cpu_usage:
+            return 0, 0
+        avg_cpu = sum(self.cpu_usage) / len(self.cpu_usage)
+        max_mem = max(self.memory_usage) if self.memory_usage else 0
+        return avg_cpu, max_mem
+
+def run_query(conn, query_name, sql, threads, iteration):
+    """执行单个查询并记录时间与资源"""
+    
+    # 设置线程数
+    conn.execute(f"PRAGMA threads={threads};")
+    
+    # 清理缓存 (如果配置开启)
+    drop_os_caches()
+    
+    # 强制清理 DuckDB 内部缓存 (Buffer Manager)
+    # conn.execute("PRAGMA memory_limit='120GB';") # Optional reset
+    
+    monitor = ResourceMonitor(interval=0.1)
+    
+    start_time = time.time()
+    monitor.start()
+    try:
+        conn.execute(sql).fetchall() # Fetch results to ensure execution completes
+    except Exception as e:
+        print(f"Error executing {query_name}: {e}")
+    finally:
+        monitor.stop()
+    end_time = time.time()
+    
+    avg_cpu, max_mem = monitor.get_stats()
+    duration = end_time - start_time
+    
+    print(f"   Iter {iteration}: {duration:.4f}s | CPU: {avg_cpu:.1f}% | Mem: {max_mem:.1f}MB")
+    return duration, avg_cpu, max_mem
+
+# ... (Configuration constants remain the same)
+
+# ... (Main loop logic needs update to store new metrics)
+
 # 数据文件路径模式 (Glob Pattern)
 PARQUET_PATH = 'data/yellow_tripdata_*.parquet' 
 CSV_PATH = 'data/yellow_tripdata_*.csv'         
@@ -77,22 +153,6 @@ def drop_os_caches():
     except Exception as e:
         print(f"  [Warning] Failed to drop caches: {e}")
 
-def run_query(conn, query_name, sql, threads, iteration):
-    """执行单个查询并记录时间"""
-    
-    # 设置线程数
-    conn.execute(f"PRAGMA threads={threads};")
-    
-    # 清理缓存 (如果配置开启)
-    if CLEAR_CACHE: # Each run should potentially be cold start if analyzing IO
-        drop_os_caches()
-    
-    start_time = time.time()
-    conn.execute(sql)
-    end_time = time.time()
-    
-    duration = end_time - start_time
-    return duration
 
 # ================= 主程序 =================
 
@@ -121,17 +181,19 @@ def main():
         for q_name, q_info in QUERIES.items():
             formatted_sql = q_info['sql'].format(data_path=path)
             
+            print(f"Running {q_name} with {threads} threads...")
             times = []
-            print(f"  Running {q_name} ({q_info['desc']})...", end="", flush=True)
-            
+            cpus = []
+            mems = []
             for i in range(ITERATIONS):
-                # 执行查询
-                t = run_query(conn, q_name, formatted_sql, threads, i)
-                times.append(t)
-                print(f" {t:.2f}s", end="", flush=True)
+                duration, avg_cpu, max_mem = run_query(conn, q_name, q_info["sql"].format(data_path=path), threads, i+1)
+                times.append(duration)
+                cpus.append(avg_cpu)
+                mems.append(max_mem)
             
             avg_time = sum(times) / len(times)
-            print(f" | Avg: {avg_time:.4f}s")
+            avg_cpu_total = sum(cpus) / len(cpus)
+            max_mem_peak = max(mems)
             
             results.append({
                 "Experiment": "Parallelism",
@@ -139,6 +201,8 @@ def main():
                 "Query": q_name,
                 "Threads": threads,
                 "Avg_Time_Sec": avg_time,
+                "Avg_CPU_Pct": avg_cpu_total,
+                "Max_Mem_MB": max_mem_peak,
                 "Raw_Times": times
             })
 

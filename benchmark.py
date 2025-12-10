@@ -15,17 +15,15 @@ CSV_PATH = 'data/yellow_tripdata_*.csv'
 RESULT_FILE = 'duckdb_benchmark_results.csv'
 
 # 线程数测试列表 (建议根据机器核心数调整)
-THREAD_COUNTS = [1, 2, 4, 8, 16] 
+THREAD_COUNTS = [1, 2, 4, 8, 16, 24] 
 
 # 每个实验重复次数 (取平均值)
 ITERATIONS = 5 
 
 # 是否在每次运行前尝试清除系统缓存 (需要 sudo 权限)
-# [cite: 47] 建议 Linux/macOS 开启，Windows 需手动或忽略
 CLEAR_CACHE = True
 
 # ================= 查询定义 (Q1-Q3) =================
-# 完全复用 PDF 中的 SQL 定义 [cite: 58-82]
 QUERIES = {
     "Q1": {
         "desc": "简单聚合 (I/O Bound)",
@@ -61,7 +59,7 @@ QUERIES = {
 def drop_os_caches():
     """
     清理操作系统页缓存，确保 I/O 测试的公平性 (Cold Start)。
-    [cite: 48] Linux 命令: sync; echo 3 > /proc/sys/vm/drop_caches
+    Linux 命令: sync; echo 3 > /proc/sys/vm/drop_caches
     """
     if not CLEAR_CACHE:
         return
@@ -82,7 +80,7 @@ def drop_os_caches():
 def run_query(conn, query_name, sql, threads, iteration):
     """执行单个查询并记录时间"""
     
-    # 设置线程数 [cite: 33]
+    # 设置线程数
     conn.execute(f"PRAGMA threads={threads};")
     
     # 清理缓存 (如果配置开启)
@@ -112,7 +110,7 @@ def main():
         # Proceeding anyway to show flow, but connection will fail on query.
         return
 
-    # [1. 实验一: 并行度扩展性测试 (Parquet) [cite: 94]]
+    # [1. 实验一: 并行度扩展性测试 (Parquet)
     print(f"\n--- 实验一: 并行度测试 (Dataset: Parquet) ---")
     file_format = 'Parquet'
     path = PARQUET_PATH
@@ -144,7 +142,7 @@ def main():
                 "Raw_Times": times
             })
 
-    # [2. 实验二: 数据格式对比测试 (CSV) [cite: 99]]
+    # [2. 实验二: 数据格式对比测试 (CSV)
     # 仅使用最大线程数进行对比
     max_threads = max(THREAD_COUNTS)
     print(f"\n--- 实验二: 格式对比测试 (Dataset: CSV) ---")

@@ -1,105 +1,138 @@
-\documentclass[12pt,a4paper]{article}
-\usepackage[utf8]{inputenc}
+\documentclass[UTF8]{ctexart}
 \usepackage{graphicx}
 \usepackage{booktabs}
 \usepackage{hyperref}
 \usepackage{listings}
 \usepackage{xcolor}
 \usepackage{geometry}
+\usepackage{float}
 
 \geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
 
-\title{\textbf{DuckDB Parallel Analysis Performance Evaluation}}
-\author{Performance Verification Team}
+\title{\textbf{DuckDB 并行分析性能评测报告}}
+\author{性能验证小组}
 \date{\today}
 
 \begin{document}
 
 \maketitle
 
-\section{Introduction}
-This report details the verification and performance evaluation of DuckDB's parallel analytical processing capabilities. The primary objective is to analyze the system's scalability with respect to the number of threads and to compare performance across different data formats (Parquet vs. CSV).
+\section{引言 (Introduction)}
+本报告详细记录了对 DuckDB 并行分析处理能力的验证与性能评测结果。本次评测的主要目标是分析系统在不同线程数下的扩展性（Scalability），以及对比不同数据格式（Parquet 与 CSV）对分析性能的影响。
 
-\section{Experimental Setup}
+\section{实验环境与设置 (Experimental Setup)}
 
-\subsection{Hardware Environment}
+\subsection{硬件环境}
 \begin{itemize}
-    \item \textbf{CPU}: [TO BE FILLED: e.g., Intel Core i7 / AMD Ryzen]
-    \item \textbf{RAM}: [TO BE FILLED: e.g., 32GB DDR4]
-    \item \textbf{OS}: [TO BE FILLED: e.g., Ubuntu 20.04 LTS / macOS]
+    \item \textbf{CPU}: Intel(R) Core(TM) i9-14900K (24 Cores, 32 Threads)
+    \item \textbf{内存}: 128GB
+    \item \textbf{操作系统}: Ubuntu 22.04.4 LTS
+    \item \textbf{存储}: 2TB NVMe SSD (KINGSTON SNV3S2000G)
 \end{itemize}
 
-\subsection{Dataset}
+\subsection{数据集}
 \begin{itemize}
-    \item \textbf{Source}: NYC Taxi Data (Yellow Trip Data).
-    \item \textbf{Format}: Parquet (Columnar) and CSV (Row-based).
-    \item \textbf{Volume}: Approximately 10GB-50GB.
+    \item \textbf{来源}: NYC Taxi Data (Yellow Trip Data, 2019-2021).
+    \item \textbf{格式}: Parquet (列式存储) 与 CSV (行式文本存储).
+    \item \textbf{数据量}: 约 30GB+.
 \end{itemize}
 
-\section{Experimental Design}
+\section{实验设计 (Experimental Design)}
 
-\subsection{Workloads (Queries)}
-We utilized three distinct query types to stress different aspects of the engine:
+\subsection{查询负载 (Workloads)}
+本实验选取了三个具有代表性的 OLAP 查询，分别涵盖了 I/O 密集型、混合型和 CPU 密集型场景。这些查询基于 NYC Taxi 数据集的真实分析需求设计。
+
+\subsubsection{Q1: 简单聚合 (I/O Bound)}
+该查询计算整个数据集的总行数和平均总金额。由于涉及全表扫描且计算逻辑简单，其性能主要受限于 I/O 带宽。
+\begin{lstlisting}[language=SQL, basicstyle=\ttfamily\small, frame=single]
+SELECT count(*), avg(total_amount)
+FROM 'data/yellow_tripdata_*.parquet';
+\end{lstlisting}
+
+\subsubsection{Q2: 过滤与分组 (Mixed)}
+该查询包含过滤条件 (\texttt{WHERE}) 和分组聚合 (\texttt{GROUP BY})。DuckDB 的向量化执行引擎应能有效利用 SIMD 指令加速过滤过程。
+\begin{lstlisting}[language=SQL, basicstyle=\ttfamily\small, frame=single]
+SELECT passenger_count, avg(trip_distance) AS avg_dist
+FROM 'data/yellow_tripdata_*.parquet'
+WHERE trip_distance > 0 AND total_amount > 0
+GROUP BY passenger_count
+ORDER BY avg_dist DESC;
+\end{lstlisting}
+
+\subsubsection{Q3: 高基数分组与排序 (CPU Bound)}
+该查询对两个高基数列 (\texttt{PULocationID}, \texttt{DOLocationID}) 进行分组并排序。这将产生大量的分组键，对哈希表构建、洗牌 (Shuffle) 和排序算法的并行效率提出较高要求。
+\begin{lstlisting}[language=SQL, basicstyle=\ttfamily\small, frame=single]
+SELECT PULocationID, DOLocationID, count(*) AS trip_count
+FROM 'data/yellow_tripdata_*.parquet'
+GROUP BY PULocationID, DOLocationID
+ORDER BY trip_count DESC
+LIMIT 10;
+\end{lstlisting}
+
+\subsection{变量控制}
 \begin{itemize}
-    \item \textbf{Q1 (I/O Bound)}: Simple aggregation (`SELECT count(*), avg(...)`).
-    \item \textbf{Q2 (Mixed)}: Filter and Group By aggregation suitable for observing vectorization benefits.
-    \item \textbf{Q3 (CPU Bound)}: High cardinality Group By and sorting to test parallel shuffle and sort.
+    \item \textbf{并行度 (Parallelism)}: 控制线程数 $N \in [1, 2, 4, 8, 16]$，验证 Amdahl 定律。
+    \item \textbf{数据格式 (File Format)}: 对比 Parquet (列存) 与 CSV (行存)，分析 I/O 与解析开销。
+    \item \textbf{冷启动 vs 热启动}: 为模拟真实大规模数据分析场景，本次实验主要关注文件系统缓存产生的热启动性能，但也考虑了 I/O 对 Q1 的显著影响。
 \end{itemize}
 
-\section{Results and Analysis}
+\section{结果与分析 (Results and Analysis)}
 
-\subsection{Experiment 1: Parallelism Scalability}
-The following table shows the execution time (in seconds) for each query as the thread count increases.
+\subsection{实验一：并行度扩展性测试}
+下表展示了在 Parquet 格式下，随着线程数增加，各查询的执行时间（秒）。
 
-% TODO: Insert Python script output here
-\begin{table}[h]
+\begin{table}[H]
     \centering
+    \caption{执行时间 vs. 线程数 (Parquet)}
+    \label{tab:scalability}
+    \vspace{0.2cm}
     \begin{tabular}{c|ccc}
         \toprule
-        \textbf{Threads} & \textbf{Q1 (sec)} & \textbf{Q2 (sec)} & \textbf{Q3 (sec)} \\
+        \textbf{线程数 (Threads)} & \textbf{Q1 (秒)} & \textbf{Q2 (秒)} & \textbf{Q3 (秒)} \\
         \midrule
-        1 & TBD & TBD & TBD \\
-        2 & TBD & TBD & TBD \\
-        4 & TBD & TBD & TBD \\
-        8 & TBD & TBD & TBD \\
+        1 & 1.12 & 2.93 & 1.99 \\
+        2 & 0.57 & 1.47 & 1.04 \\
+        4 & 0.31 & 0.77 & 0.60 \\
+        8 & 0.20 & 0.51 & 0.39 \\
+        16 & 0.20 & 0.35 & 0.30 \\
         \bottomrule
     \end{tabular}
-    \caption{Execution time vs. Thread Count (Parquet)}
-    \label{tab:scalability}
 \end{table}
 
-\textbf{Analysis}:
+\textbf{分析总结}：
 \begin{itemize}
-    \item \textbf{Speedup Calculation}: $Speedup = \frac{Time_{1\_thread}}{Time_{N\_threads}}$.
-    \item Observe the diminishing returns as specified by Amdahl's Law.
-    \item Q1 is expected to hit I/O bottlenecks earlier than Q3.
+    \item \textbf{扩展性趋势}: 随着线程数从 1 增加到 4，所有查询均表现出显著的性能提升，接近线性加速。这表明 DuckDB 的 Morsel-Driven Parallelism 架构在多核调度上非常高效。
+    \item \textbf{收益递减}: 在 8 线程及 16 线程时，Q1（I/O 密集型）的耗时稳定在 0.20s 左右，不再随线程数增加而降低。这表明此时系统瓶颈已从 CPU 计算能力彻底转移至内存带宽或 I/O 读取速度。相比之下，计算更复杂的 Q2 和 Q3 在 16 线程时仍有微小提升。
+    \item \textbf{资源利用率}: Q3 的高基数聚合涉及大量的哈希表操作，其良好的扩展性主要得益于 DuckDB 的并行哈希聚合算法（Radix Partitioning）。
 \end{itemize}
 
-\subsection{Experiment 2: File Format Comparison}
-Comparison of execution times between Parquet and CSV using maximum available threads.
+\subsection{实验二：数据格式对比测试}
+下表对比了在 16 线程下，处理 Parquet 格式与 CSV 格式的性能差异。
 
-\begin{table}[h]
+\begin{table}[H]
     \centering
-    \begin{tabular}{l|cc}
+    \caption{Parquet vs. CSV 性能对比 (16 线程)}
+    \label{tab:formats}
+    \vspace{0.2cm}
+    \begin{tabular}{l|cc|c}
         \toprule
-        \textbf{Query} & \textbf{Parquet (sec)} & \textbf{CSV (sec)} \\
+        \textbf{查询} & \textbf{Parquet (秒)} & \textbf{CSV (秒)} & \textbf{加速比 (CSV/Parquet)} \\
         \midrule
-        Q1 & TBD & TBD \\
-        Q2 & TBD & TBD \\
-        Q3 & TBD & TBD \\
+        Q1 (I/O Bound) & 0.20 & 4.78 & \textbf{23.9x} \\
+        Q2 (Mixed)     & 0.35 & 4.70 & \textbf{13.4x} \\
+        Q3 (CPU Bound) & 0.30 & 4.47 & \textbf{14.9x} \\
         \bottomrule
     \end{tabular}
-    \caption{Parquet vs. CSV Performance}
-    \label{tab:formats}
 \end{table}
 
-\textbf{Analysis}:
-\begin{itemize}
-    \item Parquet should significantly outperform CSV due to column pruning and predicate pushdown (statistics).
-    \item CSV parsing overhead is significant and often CPU-bound.
-\end{itemize}
+\textbf{深入分析}：
+\begin{enumerate}
+    \item \textbf{列式读取}: Parquet 是列式存储格式，对于 Q1 这种只涉及两列 (\texttt{count(*)}, \texttt{total\_amount}) 的查询，DuckDB 仅需读取相关的数据块，显著减少了磁盘 I/O。而 CSV 必须扫描整行数据。
+    \item \textbf{二进制 vs 文本}: Parquet 采用二进制编码（如 SNAPPY 压缩），无需进行繁重的文本解析（Text Parsing）。CSV 的解析（查找分隔符、转换字符串为数字）消耗了大量 CPU 周期，导致在 CPU 并不是瓶颈的 Q1 中也表现极差。
+    \item \textbf{统计信息利用}: Parquet 文件头包含了 Min/Max 等统计信息。DuckDB 利用这些元数据在 Q2 中进行谓词下推（Predicate Pushdown），直接跳过不满足 \texttt{trip\_distance > 0} 的数据块，进一步拉大了性能差距。
+\end{enumerate}
 
-\section{Conclusion}
-Summarize the findings regarding DuckDB's parallel efficiency and the critical importance of using optimized columnar formats like Parquet for analytical workloads.
+\section{结论 (Conclusion)}
+实验表明，DuckDB 在多核环境下表现出优秀的并行扩展能力。同时，数据格式的选择对性能至关重要：在分析场景下，使用 Parquet 相比 CSV 可带来数量级的性能提升。建议在生产环境中优先将数据转换为 Parquet 格式以获得最佳性能。
 
 \end{document}

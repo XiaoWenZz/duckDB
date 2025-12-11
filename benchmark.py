@@ -252,6 +252,53 @@ def main():
                 print(f"\n  [Error] Failed to run CSV query {q_name}: {e}")
 
 
+
+    # [3. 实验三: 数据规模扩展性测试 (Data Scale)]
+    print(f"\n--- 实验三: 数据规模测试 (Data Scale) ---")
+    # 定义不同规模的数据集路径
+    scales = {
+        "1_Month": "data/yellow_tripdata_2019-01.parquet",
+        "1_Year": "data/yellow_tripdata_2019-*.parquet",
+        "3_Years": "data/yellow_tripdata_*.parquet"
+    }
+    
+    for scale_name, scale_path in scales.items():
+        # 检查文件是否存在
+        found_files = glob.glob(scale_path)
+        if not found_files:
+            print(f"  [Skip] {scale_name}: No files match '{scale_path}'")
+            continue
+        
+        print(f"  [Run] {scale_name}: Found {len(found_files)} files.")
+            
+        conn = duckdb.connect(database=':memory:')
+        for q_name, q_info in QUERIES.items():
+            print(f"    Running {q_name} with {max_threads} threads...", end="", flush=True)
+            times = []
+            cpus = []
+            mems = []
+            for i in range(ITERATIONS):
+                 duration, avg_cpu, max_mem = run_query(conn, q_name, q_info["sql"].format(data_path=scale_path), max_threads, i+1)
+                 times.append(duration)
+                 cpus.append(avg_cpu)
+                 mems.append(max_mem)
+
+            avg_time = sum(times) / len(times)
+            avg_cpu_total = sum(cpus) / len(cpus)
+            max_mem_peak = max(mems)
+            
+            results.append({
+                "Experiment": "Data_Scale",
+                "Format": "Parquet",
+                "Query": q_name,
+                "Threads": max_threads, 
+                "Avg_Time_Sec": avg_time,
+                "Data_Scale": scale_name, 
+                "Avg_CPU_Pct": avg_cpu_total,
+                "Max_Mem_MB": max_mem_peak,
+                "Raw_Times": times
+            })
+
     # 保存结果
     df = pd.DataFrame(results)
     df.to_csv(RESULT_FILE, index=False)

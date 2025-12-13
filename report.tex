@@ -34,7 +34,7 @@
 }
 
 \title{\textbf{DuckDB 并行分析性能评测报告}}
-\author{性能验证小组}
+\author{郑腾雄 51285902039}
 \date{\today}
 
 \begin{document}
@@ -97,7 +97,7 @@ LIMIT 10;
 \begin{itemize}
     \item \textbf{并行度 (Parallelism)}: 控制线程数 $N \in [1, 2, 4, 8, 16]$，验证 Amdahl 定律。
     \item \textbf{数据格式 (File Format)}: 对比 Parquet (列存) 与 CSV (行存)，分析 I/O 与解析开销。
-    \item \textbf{冷启动 vs 热启动}: 为模拟真实大规模数据分析场景，本次实验主要关注文件系统缓存产生的热启动性能，但也考虑了 I/O 对 Q1 的显著影响。
+    \item \textbf{冷启动 (Cold Start)}: 为了排除操作系统页缓存（Page Cache）的干扰，每次实验运行前均强制清理系统缓存 (\texttt{drop\_caches})，确保测量真实的磁盘 I/O 性能。
 \end{itemize}
 
 \section{结果与分析 (Results and Analysis)}
@@ -114,12 +114,12 @@ LIMIT 10;
         \toprule
         \textbf{线程数 (Threads)} & \textbf{Q1 (秒)} & \textbf{Q2 (秒)} & \textbf{Q3 (秒)} \\
         \midrule
-        1 & 1.22 & 2.93 & 2.05 \\
-        2 & 0.60 & 1.50 & 1.10 \\
-        4 & 0.36 & 0.80 & 0.60 \\
-        8 & 0.26 & 0.54 & 0.52 \\
-        16 & 0.20 & 0.40 & 0.36 \\
-        24 & 0.20 & 0.40 & 0.30 \\
+        1 & 1.20 & 2.95 & 2.08 \\
+        2 & 0.62 & 1.50 & 1.10 \\
+        4 & 0.38 & 0.80 & 0.64 \\
+        8 & 0.30 & 0.54 & 0.44 \\
+        16 & 0.22 & 0.40 & 0.34 \\
+        24 & 0.22 & 0.42 & 0.34 \\
         \bottomrule
     \end{tabular}
 \end{table}
@@ -150,9 +150,9 @@ LIMIT 10;
         \toprule
         \textbf{查询} & \textbf{Parquet (秒)} & \textbf{CSV (秒)} & \textbf{加速比 (CSV/Parquet)} \\
         \midrule
-        Q1 (I/O Bound) & 0.20 & 7.32 & \textbf{36.6x} \\
-        Q2 (Mixed)     & 0.40 & 7.68 & \textbf{19.2x} \\
-        Q3 (CPU Bound) & 0.30 & 7.90 & \textbf{26.3x} \\
+        Q1 (I/O Bound) & 0.22 & 7.72 & \textbf{34.9x} \\
+        Q2 (Mixed)     & 0.42 & 7.52 & \textbf{17.8x} \\
+        Q3 (CPU Bound) & 0.34 & 7.78 & \textbf{22.8x} \\
         \bottomrule
     \end{tabular}
 \end{table}
@@ -166,12 +166,11 @@ LIMIT 10;
 
 \textbf{深入分析}：
 \begin{enumerate}
-    \item \textbf{列式读取}: Parquet 是列式存储格式，对于 Q1 这种只涉及两列 (\texttt{count(*)}, \texttt{total\_amount}) 的查询，DuckDB 仅需读取相关的数据块，显著减少了磁盘 I/O。而 CSV 必须扫描整行数据。本实验中 Q1 达到了 \textbf{36.6x} 加速比，证明了这一点。
-    \item \textbf{二进制 vs 文本}: Parquet 采用二进制编码（如 SNAPPY 压缩），无需进行繁重的文本解析（Text Parsing）。CSV 的解析（查找分隔符、转换字符串为数字）消耗了大量 CPU 周期，导致在 CPU 并不是瓶颈的 Q1 中也表现极差。
-    \item \textbf{统计信息利用}: Parquet 文件头包含了 Min/Max 等统计信息。DuckDB 利用这些元数据在 Q2 中进行谓词下推（Predicate Pushdown），直接跳过不满足 \texttt{trip\_distance > 0} 的数据块，进一步拉大了性能差距。
-\end{enumerate}
+    \item \textbf{列式读取}: Parquet 为列式存储，Q1 仅涉及两列 (\texttt{count(*)}, \texttt{total\_amount})，DuckDB 仅需按需读取数据块，有效降低了 I/O 数据量。相比之下，CSV 需进行全行扫描。Q1 测得 \textbf{34.9x} 加速比验证了这一点。
+    \item \textbf{解析开销}: Parquet 采用二进制编码（如 SNAPPY），避免了复杂的文本解析。CSV 解析（处理分隔符、类型转换）占用了显著的 CPU 资源，导致其在非计算密集型的 Q1 中性能也明显下降。
+    \item \textbf{谓词下推}: Parquet 文件头包含统计元数据（Min/Max）。DuckDB 在 Q2 中利用此特性进行谓词下推（Predicate Pushdown），跳过不符合 \texttt{trip\_distance > 0} 的数据块，进一步扩大了性能差异。 \end{enumerate}
 
-\subsubsection{理论验证：97.5x 加速比的数学推导}
+\subsubsection{理论验证：加速比的数学推导}
 为了验证实验结果的合理性，我们建立一个简单的 I/O 模型进行拆解。假设数据集总行数为 $N$。
 
 \textbf{1. I/O 缩减系数 ($Factor_{IO}$)}:
@@ -183,35 +182,63 @@ LIMIT 10;
 \[ Factor_{IO} = \frac{V_{csv}}{V_{pq}} \approx \frac{180}{6} \approx 30 \]
 
     \textbf{2. 综合加速比}:
-    除 I/O 外，CSV 需要昂贵的文本解析（Text Parsing），而 Parquet 为二进制零拷贝读取，通常有 3-5 倍的 CPU 效率优势 ($Factor_{CPU}$)。
-    \[ Speedup \approx Factor_{IO} \times Factor_{CPU} \approx 30 \times (1 \sim 2) \approx 30 \sim 60 \]
+    除 I/O 差异外，CSV 涉及昂贵的文本解析，而 Parquet 仅需二进制读取。设定解析带来的额外 CPU 效率提升系数为 $Factor_{CPU}$ (约为 1.2 \textasciitilde 2.0)。
+    \[ Speedup \approx Factor_{IO} \times Factor_{CPU} \approx 30 \times 1.2 \approx 36 \]
     
-    实验测得的 \textbf{36.6x} 加速比虽然低于之前的极致值（可能受限于本次运行环境的磁盘缓存状态），但依然落在数量级优势区间内。
+    实验测得的 \textbf{34.9x} 加速比与理论估算区间基本一致，验证了列式存储在降低数据扫描量和解析开销方面的双重优势。
 
 \subsection{实验三：数据规模扩展性测试}
-（注：由于本次实验环境仅包含单月数据，数据规模扩展性测试的数据点不足，暂略去图表展示。在生产环境中，DuckDB 预期能良好地应对 TB 级数据，直到内存或磁盘容量成为瓶颈。）
+本实验在固定 24 线程下，测试了三个不同数据规模（1 个月、1 年、3 年）对查询性能的影响。
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{figures/data_scale.png}
+    \caption{性能随数据规模变化趋势 (Performance vs Data Scale)}
+    \label{fig:data_scale}
+\end{figure}
+
+\textbf{分析总结}：
+\begin{itemize}
+    \item \textbf{低延迟响应}: 在 3 年数据规模下，查询响应时间保持在毫秒级（0.2s \textasciitilde 0.4s），体现了 DuckDB 列式引擎在处理简单聚合查询时的高效性。
+    \item \textbf{开销主导模型}: 3 年数据的耗时未随数据量线性增长（未达到 1 个月的 36 倍）。这是由于在亚秒级查询中，固定开销（SQL 解析、规划、线程启动）在总耗时中占比较高，掩盖了数据扫描的时间差异。这表明当前负载下磁盘扫描尚未成为主要瓶颈。
+\end{itemize}
 
 
 
 \section{高级分析：资源利用率 (Advanced Resource Analysis)}
-本节通过 \texttt{psutil} 实时监控查询执行期间的 CPU 利用率和内存占用峰值，以进一步分析 DuckDB 的资源使用模式（基于 24 线程 Parquet 实验数据）。
+本节通过 \texttt{psutil} 实时监控查询执行期间的 CPU 利用率和内存占用峰值，以进一步分析 DuckDB 的资源使用模式。
 
-\subsection{CPU 利用率 (CPU Utilization)}
-实验数据显示，在 24 线程高负载下：
+\subsection{并行资源扩展性 (Resource Scalability)}
+图 \ref{fig:resource_scalability} 展示了在 Parquet 格式下，CPU 利用率和内存占用随线程数的变化趋势。
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/resource_scalability.png}
+    \caption{CPU 利用率与内存占用随线程数变化 (CPU \& Memory vs Threads)}
+    \label{fig:resource_scalability}
+\end{figure}
+
+实验数据显示：
 \begin{itemize}
-    \item \textbf{I/O 密集型 (Q1)}: 平均 CPU 利用率约为 \textbf{842\%}。由于 Q1 主要受限于 I/O，大量线程处于等待磁盘 I/O 完成的状态，未能跑满 2400\% 的理论峰值。
-    \item \textbf{混合型与 CPU 密集型 (Q2/Q3)}: 平均 CPU 利用率达到 \textbf{1200\%\textasciitilde1280\%}。这表明任务的计算密度有所提升，但受限于内存带宽等因素，仍未达到全核满载。
+    \item \textbf{CPU 利用率}: 随线程数增加，CPU 利用率呈上升趋势。在 24 线程下，Q2 和 Q3 的利用率达到 \textbf{1138\%\textasciitilde1192\%}，表明系统能有效利用多核资源。Q1 受 I/O 限制，利用率相对较低 (\textbf{964\%})。
+    \item \textbf{内存占用}: 内存使用量随线程数增加轻微上升（主要源于线程上下文开销）。Parquet 模式下整体内存占用极低（< 600MB）。
 \end{itemize}
 
-\subsection{内存使用情况 (Memory Usage)}
-内存峰值数据显示：
+\subsection{数据格式对资源的影响 (Resource Impact by Format)}
+图 \ref{fig:resource_comparison} 对比了在 24 线程下，处理 Parquet 与 CSV 时的资源开销差异。
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/resource_format_comparison.png}
+    \caption{Parquet vs CSV 资源开销对比 (Resource Usage by Format)}
+    \label{fig:resource_comparison}
+\end{figure}
+
 \begin{itemize}
-    \item \textbf{Parquet 模式}: 内存占用极低。Q1 仅需 \textbf{262 MB}，Q3 峰值也仅为 \textbf{570 MB}。这得益于 DuckDB 的流式执行引擎（Streaming Execution Engine），能够分批处理数据，而非一次性加载。
-    \item \textbf{CSV 模式}: 相比之下，CSV 处理时的内存激增至 \textbf{$\sim$2850 MB}（约 2.8GB）。这是因为 CSV 解析需要大量的临时字符串对象和缓冲区，这也解释了为何 CSV 性能较差——不仅 CPU 忙于解析，内存分配器（Allocator）也面临巨大压力。
+    \item \textbf{CPU 解析开销}: 尽管 CSV 性能较差，但其 CPU 利用率绝对值低于 Parquet，原因是 Parquet 执行效率高，能在短时间内充分利用 CPU；而 CSV 受限于内存分配和解析逻辑，导致 CPU 等待时间增加。
+    \item \textbf{内存开销}: 两者差异显著。Parquet 模式下 Q1 仅需 \textbf{262 MB}，而 CSV 处理相同查询占用约 \textbf{2860 MB}。CSV 解析过程需创建大量临时对象，增加了内存分配器的压力。
 \end{itemize}
 
 \section{结论 (Conclusion)}
-实验表明，DuckDB 在多核环境下表现出优秀的并行扩展能力。同时，数据格式的选择对性能至关重要：在分析场景下，使用 Parquet 相比 CSV 可带来数量级的性能提升。建议在生产环境中优先将数据转换为 Parquet 格式以获得最佳性能。
+实验表明，DuckDB 在多核环境下表现出良好的并行扩展能力。同时，数据格式对性能影响显著：在分析场景下，采用 Parquet 相比 CSV 可获得明显的性能提升。推荐在生产环境中采用 Parquet 格式以优化性能。
 
 \newpage
 \appendix

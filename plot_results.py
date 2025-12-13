@@ -113,6 +113,72 @@ def plot_data_scale(df):
     plt.savefig(os.path.join(OUT_DIR, 'data_scale.png'), dpi=300)
     print("Generated figures/data_scale.png")
 
+def plot_resource_usage(df):
+    """绘制资源利用率图 (CPU & Memory)"""
+    
+    # 1. CPU & Memory vs Threads (Parquet)
+    subset = df[df['Experiment'] == 'Parallelism'].copy()
+    
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+    
+    # CPU Plot
+    sns.lineplot(data=subset, x='Threads', y='Avg_CPU_Pct', hue='Query', style='Query', markers=True, ax=ax1, linewidth=2.5, markersize=9)
+    ax1.set_title('CPU 利用率 vs 线程数 (Parquet)', fontsize=14)
+    ax1.set_xlabel('线程数', fontsize=12)
+    ax1.set_ylabel('CPU 使用率 (%)', fontsize=12)
+    ax1.legend(title='Query')
+
+    # Memory Plot
+    sns.lineplot(data=subset, x='Threads', y='Max_Mem_MB', hue='Query', style='Query', markers=True, ax=ax2, linewidth=2.5, markersize=9)
+    ax2.set_title('内存峰值 vs 线程数 (Parquet)', fontsize=14)
+    ax2.set_xlabel('线程数', fontsize=12)
+    ax2.set_ylabel('内存使用 (MB)', fontsize=12)
+    ax2.legend(title='Query')
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUT_DIR, 'resource_scalability.png'), dpi=300)
+    print("Generated figures/resource_scalability.png")
+
+    # 2. Resource Comparison (Parquet vs CSV) at Max Threads
+    max_threads = df[df['Experiment'] == 'Parallelism']['Threads'].max()
+    
+    pq_data = df[(df['Experiment'] == 'Parallelism') & (df['Threads'] == max_threads)].copy()
+    pq_data['Experiment'] = 'Format_Comparison'
+    pq_data['Format'] = 'Parquet'
+    
+    csv_data = df[df['Experiment'] == 'Format_Comparison'].copy()
+    combined = pd.concat([pq_data, csv_data])
+
+    if combined.empty:
+        return
+
+    fig, (ax3, ax4) = plt.subplots(1, 2, figsize=(15, 6))
+    
+    # CPU Comparison
+    sns.barplot(data=combined, x='Query', y='Avg_CPU_Pct', hue='Format', palette='viridis', ax=ax3)
+    ax3.set_title(f'CPU 利用率对比 (Threads={max_threads})', fontsize=14)
+    ax3.set_ylabel('CPU 使用率 (%)', fontsize=12)
+    
+    # Memory Comparison
+    sns.barplot(data=combined, x='Query', y='Max_Mem_MB', hue='Format', palette='viridis', ax=ax4)
+    ax4.set_title(f'内存峰值对比 (Threads={max_threads})', fontsize=14)
+    ax4.set_ylabel('内存使用 (MB)', fontsize=12)
+    
+    # Annotate Memory bars since the difference is huge
+    for p in ax4.patches:
+        height = p.get_height()
+        if height > 0:
+            ax4.annotate(f'{int(height)}', 
+                        (p.get_x() + p.get_width() / 2., height), 
+                        ha = 'center', va = 'center', 
+                        xytext = (0, 9), 
+                        textcoords = 'offset points')
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUT_DIR, 'resource_format_comparison.png'), dpi=300)
+    print("Generated figures/resource_format_comparison.png")
+
+
 def main():
     if not os.path.exists(RESULT_FILE):
         print(f"Error: {RESULT_FILE} not found.")
@@ -123,6 +189,7 @@ def main():
     plot_scalability(df)
     plot_format_comparison(df)
     plot_data_scale(df)
+    plot_resource_usage(df)
 
 if __name__ == "__main__":
     main()
